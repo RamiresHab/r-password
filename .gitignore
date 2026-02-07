@@ -1,0 +1,4 @@
+admin-r.json
+*terraform*
+ansible-password-manager/inventory.yaml
+ansible-password-manager/files/vars.yaml

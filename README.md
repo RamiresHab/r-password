@@ -1,2 +1,0 @@
-# r-password
-Password manager
