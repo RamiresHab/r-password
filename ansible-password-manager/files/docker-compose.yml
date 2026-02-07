@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pmuser:pmpass@db:5432/pmdb
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    networks:
+      - pm-network
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pmuser
+      POSTGRES_PASSWORD: pmpass
+      POSTGRES_DB: pmdb
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - pm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmuser -d pmdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - pm-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/www/html:/var/www/html
+    depends_on:
+      - web
+    restart: unless-stopped
+    networks:
+      - pm-network
+
+networks:
+  pm-network:
+    driver: bridge
+
+volumes:
+  pg_data:
+    driver: local
+  redis_data:
+    driver: local

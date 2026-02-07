@@ -1,0 +1,136 @@
+---
+- name: Deploy Password Manager on Ubuntu 24.04
+  hosts: pm-server
+  become: yes
+  vars_files:
+    - files/vars.yaml
+
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+  roles:
+    - common
+
+  tasks:
+
+    - name: Get OS type (uname -s)
+      command: uname -s
+      register: os_type
+      changed_when: false
+
+    - name: Get architecture (uname -m)
+      command: uname -m
+      register: arch_type
+      changed_when: false
+
+    - name: Construct docker-compose download URL
+      set_fact:
+        docker_compose_url: "https://github.com/docker/compose/releases/latest/download/docker-compose-{{ os_type.stdout }}-{{ arch_type.stdout }}"
+
+    - name: Download and install docker-compose
+      get_url:
+        url: "{{ docker_compose_url }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+        validate_certs: yes
+      register: docker_compose_download
+
+    - name: Verify docker-compose is executable
+      command: /usr/local/bin/docker-compose --version
+      register: docker_compose_check
+      ignore_errors: yes
+
+    - name: Debug if docker-compose failed
+      debug:
+        msg: "docker-compose installation failed: {{ docker_compose_download }} | {{ docker_compose_check }}"
+      when: docker_compose_download is failed or docker_compose_check is failed
+
+    - name: Ensure docker service is started and enabled
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Create project directory
+      file:
+        path: /opt/password-manager
+        state: directory
+        mode: '0755'
+
+    - name: Clone project repository
+      git:
+        repo: https://github.com/yourname/password-manager.git
+        dest: /opt/password-manager
+        version: main
+        force: yes
+
+    - name: Copy docker-compose.yml
+      copy:
+        src: files/docker-compose.yml
+        dest: /opt/password-manager/docker-compose.yml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Copy Nginx config
+      copy:
+        src: files/nginx.conf
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable and restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: yes
+
+    - name: Run docker-compose up
+      docker_compose:
+        project_src: /opt/password-manager
+        state: present
+        build: no
+      notify:
+        - Restart docker-compose
+
+    - name: Install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Enable fail2ban
+      systemd:
+        name: fail2ban
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart docker-compose
+      docker_compose:
+        project_src: /opt/password-manager
+        state: restarted
+
+  post_tasks:
+    - name: Ensure UFW is enabled
+      ufw:
+        state: enabled
+      when: ansible_os_family == "Debian"
+
+    - name: Allow SSH, HTTP, HTTPS
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - 22
+        - 80
+        - 443

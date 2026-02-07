@@ -1,0 +1,4 @@
+---
+# defaults for common role
+ufw_enabled: true
+docker_user: "{{ ansible_user }}"
